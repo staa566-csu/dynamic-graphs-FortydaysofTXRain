@@ -1,0 +1,148 @@
+---
+title: "Homework2"
+author: "Anne Goj"
+date: "2022-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,warning=FALSE,message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+library(plotly)
+
+```
+## A Dynamic Plot of Pollution in Houston Metro
+
+>"and then you got the Houston, the carcinogenic coast is what I call it all the way up to Lousiana"
+-**Bernie**, a 2011 movie
+
+The EPA has mandatory reporting for the release and disposal of certain chemicals from Company sites.  I will draw data from the Toxics Release Inventory (TRI) Basic Data Files for the state of Texas.  The data in this folders is available for download at: https://www.epa.gov/toxics-release-inventory-tri-program/tri-basic-data-files-calendar-years-1987-present
+and an explanation of the fields in the data files is given at https://www.epa.gov/toxics-release-inventory-tri-program/tri-basic-data-files-guide .
+
+I am interested in looking at a subset of the chemicals- those which are labeled as "Persistent Bioaccumulative and Toxic", or PBT,
+for Harris County in the years 2016-2020.  Harris County encompasses Houston and its suburbs and is a hub for both petroleum refineries and chemical plants.  As a region on the Gulf coast, it is also vulnerable to hurricanes and flooding. This time frame has included major flooding events like Hurricane Harvey in 2017 and tropical storm Imelda in 2019. I want to look at chemical emissions to the air or to surface water.
+
+Although I could look at total sums for all sites, after looking at the data I found that there were many facilities that could be considered outliers that reporting the release of larger quantities of chemicals than most sites.  I decided to plot the data as a boxplot for each chemical with a log scale so the outliers could fit.  The data is split by release modes, so it it easy to see that some chemicals like polycyclic aromatic compounds tend to be released into the air rather than water.  I added a slider to select the year and kept the y-range the same for all data (although admittedly it is harder to compare on a log scale.) I don't see any strong trends associated with the years.
+
+
+## Data cleaning
+
+- combine the downloaded files for different years
+```{r}
+tox15 <- read.csv("tri_2015_tx.csv")
+tox16 <- read.csv("tri_2016_tx.csv")
+tox17 <- read.csv("tri_2017_tx.csv")
+tox18 <- read.csv("tri_2018_tx.csv")
+tox19 <- read.csv("tri_2019_tx.csv")
+tox20 <- read.csv("tri_2020_tx.csv")
+tx_toxin <-  bind_rows(tox15,tox16,tox17,tox18,tox19,tox20)
+```
+
+- select relevant columns and filter only those that are classified as PBTs. Remove federally run facilities and look at privately operated company sites.
+```{r}
+
+# tx_toxin %>% head(3)
+# colnames(tx_toxin)
+tx_toxin2 <- tx_toxin %>% select("X1..YEAR","X4..FACILITY.NAME","X7..COUNTY","X13..LONGITUDE","X12..LATITUDE","X34..CHEMICAL","X40..CLASSIFICATION","X46..UNIT.OF.MEASURE","X43..CARCINOGEN","X61..ON.SITE.RELEASE.TOTAL","X36..TRI.CHEMICAL.COMPOUND.ID","X47..5.1...FUGITIVE.AIR","X48..5.2...STACK.AIR","X49..5.3...WATER"                ,"X50..5.4...UNDERGROUND","X51..5.4.1...UNDERGROUND.CL.I"  , "X52..5.4.2...UNDERGROUND.C.II.V","X20..INDUSTRY.SECTOR","X18..FEDERAL.FACILITY") %>% filter(X43..CARCINOGEN=="YES")%>% mutate(released.to.air=X47..5.1...FUGITIVE.AIR+X48..5.2...STACK.AIR) %>% mutate(released.to.water.or.well=X49..5.3...WATER       +X50..5.4...UNDERGROUND+X51..5.4.1...UNDERGROUND.CL.I+X52..5.4.2...UNDERGROUND.C.II.V)  
+
+tx_toxin2 %<>% filter(X40..CLASSIFICATION=="PBT") %>% filter(!near(X61..ON.SITE.RELEASE.TOTAL,0.0))
+tx_toxin2 %<>% filter(X18..FEDERAL.FACILITY=="NO")%>% 
+  mutate(X34..CHEMICAL=as.factor(X34..CHEMICAL),X7..COUNTY=as.factor(X7..COUNTY),X20..INDUSTRY.SECTOR=as.factor(X20..INDUSTRY.SECTOR))
+
+```
+- Look quickly at the total amounts per year for the county.
+```{r}
+ggplot(data=tx_toxin2 %>% group_by(X7..COUNTY,X34..CHEMICAL,X1..YEAR) %>% summarize(totalsitereleases=sum(X61..ON.SITE.RELEASE.TOTAL)) %>% filter(X7..COUNTY== "HARRIS"))+geom_line(mapping=aes(y=totalsitereleases,x=X1..YEAR,color=X34..CHEMICAL))
+
+ggplot(data=tx_toxin2 %>% group_by(X7..COUNTY,X34..CHEMICAL,X1..YEAR) %>% summarize(totalair=sum(released.to.air)) %>% filter(X7..COUNTY== "HARRIS"))+geom_line(mapping=aes(y=totalair,x=X1..YEAR,color=X34..CHEMICAL))
+
+ggplot(data=tx_toxin2 %>% group_by(X7..COUNTY,X34..CHEMICAL,X1..YEAR) %>% summarize(totalwater=sum(X49..5.3...WATER)) %>% filter(X7..COUNTY== "HARRIS"))+geom_line(mapping=aes(y=totalwater,x=X1..YEAR,color=X34..CHEMICAL))
+
+```
+
+- After filtering, we need to recreate the factors for the chemicals so the levels only include BPTs. It will be useful to pivot the data to long format by the mode of release for using Plotly.
+```{r}
+
+tx_toxin3 <- tx_toxin2 %>% filter(X7..COUNTY=="HARRIS")
+tx_toxin3 %<>% mutate(X34..CHEMICAL = fct_relevel(X34..CHEMICAL))
+
+tx_toxin4 <- tx_toxin3 %>%  dplyr::select(X1..YEAR,X34..CHEMICAL,released.to.air,X49..5.3...WATER,X4..FACILITY.NAME) %>% rename(released.to.water=X49..5.3...WATER,facility=X4..FACILITY.NAME,chemical=X34..CHEMICAL,year=X1..YEAR) %>% pivot_longer(cols=c("released.to.air","released.to.water"),names_to='release.mode',
+                    values_to='amount') %>% mutate(release.mode=as.factor(release.mode))
+```
+
+- Sumarize the box plot statistics so we can verify that the Plotly plot is giving the correctly labeled values.
+
+
+```{r}
+tx_toxin4 %>% group_by(chemical,release.mode,year) %>% summarize(max=max(amount),min=min(amount),median=median(amount))
+```
+
+
+- In plotly, create a list of available steps where each step has the tibble for the year. Create traces for each year but set the visibility of the traces to false unless selected by the year of a slider. Note that when you split data by color, Plotly creates 2 additional traces under the hood, so in order for the slider to work properly, the indexing on the number of steps will actually run to twice the length of the number of steps in the slider.  If I had more time, I would have liked to add the facility names to the hover tips for the outliers.
+
+```{r}
+# create data for each slider step
+
+#get a list of years
+years=tx_toxin4$year %>% unique()
+
+# empty list of available steps in plot
+aval <- list()
+for (step in seq(length(years))){
+  aval[[step]] <-list(visible = FALSE,
+                      name = paste0('year = ', years[step]),
+                      df=tx_toxin4 %>% filter(year==years[step])
+                      )
+}
+
+aval[1][[1]]$visible = TRUE
+
+# create steps and plot all traces
+steps <- list()
+
+fig <- plot_ly()
+
+for (i in seq(length(years))) {
+ fig <- add_trace(fig,data=aval[i][[1]]$df,
+                  x=~chemical,  y=~amount,color=~release.mode,
+                  visible = aval[i][[1]]$visible,
+                 name = aval[i][[1]]$x, 
+                 type = 'box',
+                 hoverinfo = list('y'),
+                 showlegend = TRUE)
+
+  step <- list(args = list('visible', rep(FALSE, 2*length(aval))),
+               method = 'restyle',
+               label=as.character(years)[i])
+  step$args[[2]][(i-1)*2+1] = TRUE
+  step$args[[2]][i*2] = TRUE
+  steps[[i]] = step
+}
+
+# add slider control to plot
+fig <- fig  %>%
+  layout(title = list(text="Persistent Bioaccumulative and Toxic Chemicals, Harris County, TX",
+                      font=list(family = "Arial",size = 18,color = "black")),
+         yaxis = list(title = 'Pounds Released, per Year, per Site',type = "log",range=c(-6,3)),
+         xaxis = list(title=""),
+         boxmode='group',
+         sliders = list(list(active = 5,
+                             currentvalue = list(prefix = "Year: "),
+                             pad = list(t = 75),
+                             steps = steps)))
+
+# could add button instead with
+# fig %>% layout( updatemenus = list(list(active = 2,buttons=steps)))
+```
+## Final Figure
+```{r,warning=FALSE}
+fig
+```
+
+
+
