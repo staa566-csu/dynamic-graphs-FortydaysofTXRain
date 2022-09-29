@@ -83,7 +83,8 @@ tx_toxin4 %>% group_by(chemical,release.mode,year) %>% summarize(max=max(amount)
 ```
 
 
-- In plotly, create a list of available steps where each step has the tibble for the year. Create traces for each year but set the visibility of the traces to false unless selected by the year of a slider. Note that when you split data by color, Plotly creates 2 additional traces under the hood, so in order for the slider to work properly, the indexing on the number of steps will actually run to twice the length of the number of steps in the slider.  If I had more time, I would have liked to add the facility names to the hover tips for the outliers.
+- In plotly, create a list of available steps where each step has the tibble for the year. Create traces for each year but set the visibility of the traces to false unless selected by the year of a slider. Note that when you split data by color, Plotly creates 2 additional traces under the hood, so in order for the slider to work properly, the indexing on the number of steps will actually run to twice the length of the number of steps in the slider.  
+
 
 ```{r}
 # create data for each slider step
@@ -110,10 +111,11 @@ fig <- plot_ly()
 for (i in seq(length(years))) {
  fig <- add_trace(fig,data=aval[i][[1]]$df,
                   x=~chemical,  y=~amount,color=~release.mode,
+                  customdata=~facility,
                   visible = aval[i][[1]]$visible,
                  name = aval[i][[1]]$x, 
                  type = 'box',
-                 hoverinfo = list('y'),
+                 hovertemplate = '%{y} pounds, site:%{customdata}',
                  showlegend = TRUE)
 
   step <- list(args = list('visible', rep(FALSE, 2*length(aval))),
@@ -143,6 +145,9 @@ fig <- fig  %>%
 ```{r,warning=FALSE}
 fig
 ```
+
+
+
 
 
 
